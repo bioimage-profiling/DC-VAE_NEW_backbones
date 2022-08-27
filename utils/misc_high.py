@@ -166,7 +166,7 @@ def accuracy(output, target, topk=(1,)):
 
         res = []
         for k in topk:
-            correct_k = correct[:k].view(-1).float().sum(0, keepdim=True)
+            correct_k = correct[:k].contiguous().view(-1).float().sum(0, keepdim=True)
             res.append(correct_k.mul_(100.0 / batch_size))
         return res
 
@@ -185,7 +185,8 @@ def disp_images(img, fname, nrow, norm="none"):
     imsize = img.shape[2]
     nc = img.shape[1]
     if nc==3 and norm=="0.5":
-        img = denorm(img,mean=[0.5, 0.5, 0.5], std=[0.5,0.5,0.5])
+       # img = denorm(img,mean=[0.5, 0.5, 0.5], std=[0.5, 0.5, 0.5])
+         img = denorm(img,mean=[0.168, 0.137, 0.096], std=[0.175, 0.159, 0.168])
     elif nc==3 and norm=="none":
         pass
     elif nc==1:
@@ -203,4 +204,3 @@ def copy_params(model):
 def load_params(model, new_param):
     for p, new_p in zip(model.parameters(), new_param):
         p.data.copy_(new_p)
-
