@@ -56,7 +56,7 @@ cont_temp          = 0.07
 n_label = 1
 batch_size = 16
 # multi-scale contrastive setting
-layers             = ["0","-1"]
+layers             = ["0","1","2","3","4","5"]
 args = parser.parse_args()
 print(args.output_dir)
 name =("").join(layers)
@@ -158,7 +158,8 @@ def sample_data(dataloader, image_size=4):
         transforms.Resize(image_size),
         transforms.CenterCrop(image_size),
         transforms.ToTensor(),
-        transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))
+       # transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))
+        transforms.Normalize((0.168, 0.137, 0.096), (0.175, 0.159, 0.168))
     ])
 
     loader = dataloader(transform)
@@ -174,7 +175,6 @@ def train(encoder, decoder,dual_encoder,dual_encoder_M,gen_avg_param, loader):
     iteration = 0
     stabilize = False
     if args.Load:
-        print("yreee")
         encoder.load_state_dict(torch.load(os.path.join(models_dir, f"{args.epoch}_encoder.sd")))
         decoder.load_state_dict(torch.load(os.path.join(models_dir, f"{args.epoch}_decoder_avg.sd")))
         gen_avg_param=copy_params(decoder)
@@ -192,33 +192,29 @@ def train(encoder, decoder,dual_encoder,dual_encoder_M,gen_avg_param, loader):
         with open(os.path.join(models_dir, f"{args.epoch}_status.pkl"), 'rb') as fp:
             dict_ = pickle.load(fp)
             global_steps=dict_["global_steps"]
-            print("global")
             print(global_steps)
-            step = 0
+            step = dict_["step"]
+            print(step)
             alpha = dict_["alpha"]
             print(alpha)
             iteration = dict_["iteration"]
-            iteration=90000
             print(iteration)
-
             stabilize = dict_["stabilize"]
             print(stabilize)
-    print(step)
     encoder.train()
     decoder.train()
     dual_encoder.train()
     dataset = sample_data(loader, 4 * 2 ** step)
-    pbar = tqdm(range(600000-global_steps))
+    pbar = tqdm(range(300000-global_steps))
 
     for i in pbar:
 
-        alpha = min(1, 0.00002 * iteration)
-
-        if stabilize is False and iteration > 50000:
+        alpha = min(1, 0.00004 * iteration)
+        if stabilize is False and iteration > 25000:
             dataset = sample_data(loader, 4 * 2 ** step)
             stabilize = True
 
-        if iteration > 100000:
+        if iteration > 50000:
             alpha = 0
             iteration = 0
             step += 1
@@ -235,10 +231,12 @@ def train(encoder, decoder,dual_encoder,dual_encoder_M,gen_avg_param, loader):
             dataset = sample_data(loader, 4 * 2 ** step)
             real_image, label = next(dataset)
         if batch_size!= real_image.shape[0]:
-            continue
+           i-=1            
+           continue
         curr_bs = real_image.shape[0]
         curr_log = f"{i+global_steps}:{i+global_steps}\t"
         real_imgs = real_image.type(torch.cuda.FloatTensor)
+        
         z = torch.cuda.FloatTensor(np.random.normal(0, 1, (real_imgs.shape[0], latent_dim-n_label)))
         # ---------------------
         #  Train Discriminator
@@ -261,7 +259,8 @@ def train(encoder, decoder,dual_encoder,dual_encoder_M,gen_avg_param, loader):
         # -----------------
         #  Train Generator
         # -----------------
-        if global_steps % 5 == 0:
+        im_k = real_imgs
+        if (i+ global_steps) % 5 == 0:
             opt_decoder.zero_grad()
             opt_encoder.zero_grad()
             gen_z = torch.cuda.FloatTensor(np.random.normal(0, 1, (real_imgs.shape[0], latent_dim-n_label)))
@@ -290,10 +289,12 @@ def train(encoder, decoder,dual_encoder,dual_encoder_M,gen_avg_param, loader):
                     p_mom.data = (p_mom.data*0.999) + (p.data*(1.0-0.999))
                 d_k = dual_encoder_M(im_k, step, alpha, mode="cont")
                 for l in layers:
+                  if int(l)<=step:
                     d_k[l] = F.normalize(d_k[l], dim=1)
             total_cont = torch.tensor(0.0).cuda()
             d_q = dual_encoder(im_q, step, alpha, mode="cont")
             for l in layers:
+              if int(l)<=step:
                 q = F.normalize(d_q[l], dim=1)
                 k = d_k[l]
                 queue = d_queue[l]
@@ -315,10 +316,11 @@ def train(encoder, decoder,dual_encoder,dual_encoder_M,gen_avg_param, loader):
             opt_cont_head.step()
 
             for l in layers:
-                ptr = int(d_queue_ptr[l])
-                d_queue[l][:, ptr:(ptr+curr_bs)] = d_k[l].transpose(0,1)
-                ptr = (ptr+curr_bs)%cont_k # move the pointer ahead
-                d_queue_ptr[l][0] = ptr
+               if int(l) <=step: 
+                 ptr = int(d_queue_ptr[l])
+                 d_queue[l][:, ptr:(ptr+curr_bs)] = d_k[l].transpose(0,1)
+                 ptr = (ptr+curr_bs)%cont_k # move the pointer ahead
+                 d_queue_ptr[l][0] = ptr
             with torch.no_grad():
                 rec_pix = torch.nn.MSELoss()(im_q, im_k).mean()
             # moving average weight
@@ -334,9 +336,9 @@ def train(encoder, decoder,dual_encoder,dual_encoder_M,gen_avg_param, loader):
             disp_images(out, fname, 8, norm="0.5")
             fname = os.path.join(viz_dir, f"{i+global_steps}_sample.png")
             disp_images(fake_imgs.view(-1,fake_imgs.shape[1],fake_imgs.shape[2],fake_imgs.shape[3]), fname, 8, norm="0.5")
-        print(i+global_steps)
         
-        if (i+global_steps) % 10000 == 0:
+        iteration+=1
+        if (i+global_steps) % 20000 == 0:
             decoder.eval()
             encoder.eval()
             backup_param = copy_params(decoder)
@@ -367,8 +369,7 @@ def train(encoder, decoder,dual_encoder,dual_encoder_M,gen_avg_param, loader):
                  pickle.dump(dictionary, f)
 
         
-        iteration+=1
-        print(iteration)
+        
         '''
         if (i + 1) % 100 == 0:
             images = []
