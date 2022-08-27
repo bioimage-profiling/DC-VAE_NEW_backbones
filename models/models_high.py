@@ -315,17 +315,16 @@ class DualEncoder(nn.Module):
 
             if i > 0:
                 out = F.avg_pool2d(out, 2)
-                Head_list[str(counter)]=self.head[index](out)
+                #Head_list[str(counter)]=self.head[index](out)
                 if i == step and 0 <= alpha < 1:
                     skip_rgb = F.avg_pool2d(input, 2)
                     skip_rgb = self.from_rgb[index + 1](skip_rgb)
                     out = (1 - alpha) * skip_rgb + alpha * out
-            else:
-                 Head_list[str(counter)]=self.head[index](out)
-
+           # else:
+            Head_list[str(counter)]=self.head[index](out)
             counter+=1
-        Head_list["-1"]=self.head[index](out)
-
+          # Head_list["-1"]=self.head[index](out)
+ 
         out = out.squeeze(2).squeeze(2)
         # print(input.size(), out.size(), step)
         out = self.linear(out)
